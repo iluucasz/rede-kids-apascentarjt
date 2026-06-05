@@ -437,24 +437,46 @@ export async function closeLesson(formData: FormData) {
   `;
   const lessonClassId = lessonRows[0]?.class_id ?? null;
 
-  await sql`
-    INSERT INTO rk_attendance (lesson_id, child_id, status, note, updated_at)
-    SELECT
-      ${lessonId},
-      member.id,
-      ${"absent"},
-      ${""},
-      NOW()
-    FROM rk_members AS member
-    WHERE member.kind = 'child'
-      AND (${lessonClassId} IS NULL OR member.class_id = ${lessonClassId})
-      AND NOT EXISTS (
-        SELECT 1
-        FROM rk_attendance AS attendance
-        WHERE attendance.lesson_id = ${lessonId}
-          AND attendance.child_id = member.id
-      )
-  `;
+  if (lessonClassId) {
+    await sql`
+      INSERT INTO rk_attendance (lesson_id, child_id, status, note, updated_at)
+      SELECT
+        ${lessonId},
+        member.id,
+        ${"absent"},
+        ${""},
+        NOW()
+      FROM rk_members AS member
+      WHERE member.kind = 'child'
+        AND member.class_id = ${lessonClassId}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM rk_attendance AS attendance
+          WHERE attendance.lesson_id = ${lessonId}
+            AND attendance.child_id = member.id
+        )
+      ON CONFLICT (lesson_id, child_id) DO NOTHING
+    `;
+  } else {
+    await sql`
+      INSERT INTO rk_attendance (lesson_id, child_id, status, note, updated_at)
+      SELECT
+        ${lessonId},
+        member.id,
+        ${"absent"},
+        ${""},
+        NOW()
+      FROM rk_members AS member
+      WHERE member.kind = 'child'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM rk_attendance AS attendance
+          WHERE attendance.lesson_id = ${lessonId}
+            AND attendance.child_id = member.id
+        )
+      ON CONFLICT (lesson_id, child_id) DO NOTHING
+    `;
+  }
 
   await sql`
     UPDATE rk_lessons
