@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { moveChildToClass } from "@/app/actions";
 import { ConfirmModal, EmptyState, Heading } from "@/components/ui";
-import type { AppData, ClassRoom, ProgressItem } from "@/lib/types";
+import type { AppData, AppUser, ClassRoom, ProgressItem } from "@/lib/types";
 import { RedeKidsShell } from "../../shell";
 import type { RunAction } from "../../types";
 
@@ -74,7 +74,13 @@ const statusStyles: Record<
   },
 };
 
-export function ProgressPage({ initialData }: { initialData: AppData }) {
+export function ProgressPage({
+  initialData,
+  currentUser,
+}: {
+  initialData: AppData;
+  currentUser: AppUser;
+}) {
   const [data, setData] = useState(initialData);
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const [notice, setNotice] = useState("");
@@ -107,6 +113,7 @@ export function ProgressPage({ initialData }: { initialData: AppData }) {
   return (
     <RedeKidsShell
       activeModule="progress"
+      currentUser={currentUser}
       search=""
       onSearchChange={() => undefined}
       isPending={isPending}
