@@ -25,8 +25,12 @@ export type Member = {
   phone: string;
   birthDate: string;
   congregatesSince: string;
+  enrollmentDate: string;
+  origin: string;
   classId: string;
   className: string;
+  classIds: string[];
+  classNames: string[];
   address: string;
   notes: string;
   categoryIds: string[];

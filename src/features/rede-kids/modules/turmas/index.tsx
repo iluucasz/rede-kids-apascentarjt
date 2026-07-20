@@ -2,18 +2,20 @@
 
 import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
-import { Baby, CalendarDays, Layers3, Plus, Search, UsersRound, X } from "lucide-react";
-import { createClassRoom } from "@/app/actions";
+import { Baby, CalendarDays, Edit2, Layers3, Plus, Search, Trash2, UsersRound, X } from "lucide-react";
+import { createClassRoom, deleteClassRoom, updateClassRoom } from "@/app/actions";
 import {
+  ConfirmModal,
   EmptyState,
   Heading,
   InputField,
   Modal,
+  SelectField,
   SubmitButton,
   TextareaField,
 } from "@/components/ui";
 import type { AppData, ClassRoom } from "@/lib/types";
-import type { RunAction } from "../../types";
+import type { ActionFn, RunAction } from "../../types";
 
 export function ClassesModule({
   data,
@@ -25,6 +27,8 @@ export function ClassesModule({
   isPending: boolean;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingClass, setEditingClass] = useState<ClassRoom | undefined>();
+  const [deletingClass, setDeletingClass] = useState<ClassRoom | null>(null);
   const [search, setSearch] = useState("");
 
   const childTotal = data.classes.reduce(
@@ -50,15 +54,43 @@ export function ClassesModule({
     );
   }, [data.classes, search]);
 
+  function openNewClass() {
+    setEditingClass(undefined);
+    setModalOpen(true);
+  }
+
+  function openEditClass(classRoom: ClassRoom) {
+    setEditingClass(classRoom);
+    setModalOpen(true);
+  }
+
   function submitClassRoom(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const formData = new FormData(form);
+    const action: ActionFn = editingClass ? updateClassRoom : createClassRoom;
 
-    runAction(createClassRoom, formData, "Turma criada.", () => {
-      form.reset();
-      setModalOpen(false);
-    });
+    runAction(
+      action,
+      formData,
+      editingClass ? "Turma atualizada." : "Turma criada.",
+      () => {
+        form.reset();
+        setModalOpen(false);
+        setEditingClass(undefined);
+      },
+    );
+  }
+
+  function confirmDeleteClass() {
+    if (!deletingClass) return;
+
+    const formData = new FormData();
+    formData.set("classId", deletingClass.id);
+
+    runAction(deleteClassRoom, formData, "Turma excluída.", () =>
+      setDeletingClass(null),
+    );
   }
 
   return (
@@ -70,7 +102,7 @@ export function ClassesModule({
         />
         <button
           type="button"
-          onClick={() => setModalOpen(true)}
+          onClick={openNewClass}
           className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-bold text-white hover:bg-emerald-800"
         >
           <Plus size={17} aria-hidden="true" />
@@ -117,7 +149,13 @@ export function ClassesModule({
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {visibleClasses.length ? (
             visibleClasses.map((classRoom) => (
-              <ClassCard key={classRoom.id} classRoom={classRoom} />
+              <ClassCard
+                key={classRoom.id}
+                classRoom={classRoom}
+                isPending={isPending}
+                onEdit={openEditClass}
+                onDelete={setDeletingClass}
+              />
             ))
           ) : (
             <div className="md:col-span-2 xl:col-span-3">
@@ -128,43 +166,114 @@ export function ClassesModule({
       </section>
 
       <ClassFormModal
+        classRoom={editingClass}
         open={modalOpen}
         pending={isPending}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          setModalOpen(false);
+          setEditingClass(undefined);
+        }}
         onSubmit={submitClassRoom}
+      />
+      <ConfirmModal
+        title="Excluir turma"
+        description={`A turma "${deletingClass?.name ?? ""}" será removida. Crianças vinculadas ficarão sem esta turma.`}
+        confirmLabel="Excluir turma"
+        open={Boolean(deletingClass)}
+        pending={isPending}
+        destructive
+        onClose={() => setDeletingClass(null)}
+        onConfirm={confirmDeleteClass}
       />
     </div>
   );
 }
 
 function ClassFormModal({
+  classRoom,
   open,
   pending,
   onClose,
   onSubmit,
 }: {
+  classRoom?: ClassRoom;
   open: boolean;
   pending: boolean;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const isEditing = Boolean(classRoom);
+
   return (
-    <Modal title="Nova turma" open={open} onClose={onClose}>
-      <form className="grid gap-4" onSubmit={onSubmit}>
-        <InputField name="name" label="Nome da turma" placeholder="2 a 4 anos" required />
+    <Modal title={isEditing ? "Editar turma" : "Nova turma"} open={open} onClose={onClose}>
+      <form key={classRoom?.id ?? "new"} className="grid gap-4" onSubmit={onSubmit}>
+        {classRoom ? (
+          <input type="hidden" name="classId" value={classRoom.id} />
+        ) : null}
+        <InputField
+          name="name"
+          label="Nome da turma"
+          placeholder="2 a 4 anos"
+          defaultValue={classRoom?.name ?? ""}
+          required
+        />
         <div className="grid gap-4 sm:grid-cols-2">
-          <InputField name="minAge" label="Idade mínima" type="number" min="0" required />
-          <InputField name="maxAge" label="Idade máxima" type="number" min="0" required />
+          <InputField
+            name="minAge"
+            label="Idade mínima"
+            type="number"
+            min="0"
+            defaultValue={classRoom ? String(classRoom.minAge) : ""}
+            required
+          />
+          <InputField
+            name="maxAge"
+            label="Idade máxima"
+            type="number"
+            min="0"
+            defaultValue={classRoom ? String(classRoom.maxAge) : ""}
+            required
+          />
         </div>
-        <InputField name="serviceSchedule" label="Escala" placeholder="Domingo manhã" />
-        <TextareaField name="notes" label="Observações" rows={4} />
-        <SubmitButton label="Criar turma" pending={pending} />
+        <InputField
+          name="serviceSchedule"
+          label="Escala"
+          placeholder="Domingo manhã"
+          defaultValue={classRoom?.serviceSchedule ?? ""}
+        />
+        {isEditing ? (
+          <SelectField
+            name="active"
+            label="Situação"
+            defaultValue={classRoom?.active ? "true" : "false"}
+          >
+            <option value="true">Ativa</option>
+            <option value="false">Inativa</option>
+          </SelectField>
+        ) : null}
+        <TextareaField
+          name="notes"
+          label="Observações"
+          rows={4}
+          defaultValue={classRoom?.notes ?? ""}
+        />
+        <SubmitButton label={isEditing ? "Salvar alterações" : "Criar turma"} pending={pending} />
       </form>
     </Modal>
   );
 }
 
-function ClassCard({ classRoom }: { classRoom: ClassRoom }) {
+function ClassCard({
+  classRoom,
+  isPending,
+  onEdit,
+  onDelete,
+}: {
+  classRoom: ClassRoom;
+  isPending: boolean;
+  onEdit: (classRoom: ClassRoom) => void;
+  onDelete: (classRoom: ClassRoom) => void;
+}) {
   return (
     <article className="rounded-2xl border border-zinc-200 bg-white p-5 transition hover:border-emerald-200 hover:bg-emerald-50/30">
       <div className="flex items-start justify-between gap-4">
@@ -174,7 +283,13 @@ function ClassCard({ classRoom }: { classRoom: ClassRoom }) {
             {classRoom.minAge} a {classRoom.maxAge} anos
           </p>
         </div>
-        <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-800">
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-bold ${
+            classRoom.active
+              ? "bg-sky-50 text-sky-800"
+              : "bg-zinc-100 text-zinc-600"
+          }`}
+        >
           {classRoom.active ? "Ativa" : "Inativa"}
         </span>
       </div>
@@ -187,6 +302,27 @@ function ClassCard({ classRoom }: { classRoom: ClassRoom }) {
       {classRoom.notes ? (
         <p className="mt-4 text-sm leading-6 text-zinc-700">{classRoom.notes}</p>
       ) : null}
+
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => onEdit(classRoom)}
+          disabled={isPending}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
+        >
+          <Edit2 size={15} aria-hidden="true" />
+          Editar
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(classRoom)}
+          disabled={isPending}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+        >
+          <Trash2 size={15} aria-hidden="true" />
+          Excluir
+        </button>
+      </div>
     </article>
   );
 }
