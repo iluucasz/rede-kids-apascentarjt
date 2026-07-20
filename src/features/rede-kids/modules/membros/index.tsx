@@ -225,9 +225,12 @@ function MemberCard({
     member.kind === "child" ? member.guardianNames : member.childNames;
   const linkedLabel =
     member.kind === "child" ? "Responsáveis vinculados" : "Crianças vinculadas";
+  const classLabel = member.classNames.length
+    ? member.classNames.join(", ")
+    : "Sem turma";
   const secondaryText =
     member.kind === "child"
-      ? `${member.className || "Sem turma"} · ${
+      ? `${classLabel} · ${
           member.age !== null ? `${member.age} ano(s)` : "Sem idade"
         }`
       : member.address || "Sem endereço";
@@ -358,7 +361,11 @@ function MemberDetailsModal({
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-zinc-600">
                   {member.kind === "child"
-                    ? `${member.className || "Sem turma"} · ${
+                    ? `${
+                        member.classNames.length
+                          ? member.classNames.join(", ")
+                          : "Sem turma"
+                      } · ${
                         member.age !== null ? `${member.age} ano(s)` : "Sem idade"
                       }`
                     : member.address || "Sem endereço"}
@@ -389,6 +396,21 @@ function MemberDetailsModal({
             label="Congrega conosco desde"
             value={formatMemberDate(member.congregatesSince)}
           />
+          {member.kind === "child" ? (
+            <>
+              <DetailPanel
+                label="Data de inscrição"
+                value={formatMemberDate(member.enrollmentDate)}
+              />
+              <DetailPanel label="Origem" value={formatOrigin(member.origin)} />
+              <DetailPanel
+                label="Turmas"
+                value={
+                  member.classNames.length ? member.classNames.join(", ") : "Sem turma"
+                }
+              />
+            </>
+          ) : null}
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
@@ -513,6 +535,12 @@ function getInitials(name: string) {
     .map((part) => part[0])
     .join("")
     .toUpperCase();
+}
+
+function formatOrigin(value: string) {
+  if (value === "projeto") return "Projeto";
+  if (value === "rede_kids") return "Rede Kids";
+  return "Não informado";
 }
 
 function formatMemberDate(value: string) {

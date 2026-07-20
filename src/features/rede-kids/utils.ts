@@ -15,12 +15,18 @@ export function buildChildReport(
   data: AppData,
   lessons: Lesson[] = data.lessons,
 ) {
+  const childClassIds =
+    child.classIds.length > 0
+      ? child.classIds
+      : child.classId
+        ? [child.classId]
+        : [];
   const relevantLessonIds = new Set(
     lessons
       .filter(
         (lesson) =>
           lesson.status === "closed" &&
-          (!lesson.classId || lesson.classId === child.classId),
+          (!lesson.classId || childClassIds.includes(lesson.classId)),
       )
       .map((lesson) => lesson.id),
   );

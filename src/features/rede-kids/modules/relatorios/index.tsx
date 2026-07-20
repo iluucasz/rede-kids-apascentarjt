@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, BarChart3, CheckCircle2, Search, TrendingUp, UsersRound, X } from "lucide-react";
+import { AlertTriangle, BarChart3, CheckCircle2, FileDown, FileSpreadsheet, Search, TrendingUp, UsersRound, X } from "lucide-react";
 import { EmptyState, Heading } from "@/components/ui";
 import type { AppData, Member } from "@/lib/types";
 import { buildChildReport } from "../../utils";
+import { downloadReportCsv, downloadReportPdf } from "./export-utils";
+import type { ReportExportRow } from "./export-utils";
 
 type ChildReport = ReturnType<typeof buildChildReport>;
 type SelectOption = { value: string; label: string };
@@ -132,7 +134,10 @@ export function ReportsModule({
   const filteredChildren = useMemo(
     () =>
       childMembers.filter(
-        (child) => selectedClassId === "all" || child.classId === selectedClassId,
+        (child) =>
+          selectedClassId === "all" ||
+          child.classIds.includes(selectedClassId) ||
+          child.classId === selectedClassId,
       ),
     [childMembers, selectedClassId],
   );
@@ -190,13 +195,76 @@ export function ReportsModule({
     });
   }, [activeFilter, reports, search]);
 
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const exportSummary = filterSummaryItems.join(" · ");
+
+  function buildExportRows(): ReportExportRow[] {
+    return visibleReports.map((report) => {
+      const total = report.present + report.absent + report.justified;
+
+      return {
+        name: report.child.fullName,
+        classes: report.child.classNames.length
+          ? report.child.classNames.join(", ")
+          : report.child.className || "Sem turma",
+        present: report.present,
+        absent: report.absent,
+        justified: report.justified,
+        total,
+        frequency: report.frequency,
+      };
+    });
+  }
+
+  function handleExportCsv() {
+    downloadReportCsv({
+      rows: buildExportRows(),
+      summary: exportSummary,
+      generatedAt: new Date(),
+    });
+  }
+
+  async function handleExportPdf() {
+    setExportingPdf(true);
+
+    try {
+      await downloadReportPdf({
+        rows: buildExportRows(),
+        summary: exportSummary,
+        generatedAt: new Date(),
+      });
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <section className="rounded-lg border border-zinc-200 bg-white p-5">
+      <section className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
         <Heading
           title="Relatórios"
           subtitle="Consulte frequência por criança com presença, falta e justificativa"
         />
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={!visibleReports.length}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-emerald-200 bg-white px-4 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet size={16} aria-hidden="true" />
+            Exportar Excel (CSV)
+          </button>
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            disabled={!visibleReports.length || exportingPdf}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileDown size={16} aria-hidden="true" />
+            {exportingPdf ? "Gerando PDF..." : "Exportar PDF"}
+          </button>
+        </div>
       </section>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

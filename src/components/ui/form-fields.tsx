@@ -12,11 +12,11 @@ export function InputField({
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & { label: string }) {
   return (
-    <label className={`grid gap-1 text-sm font-semibold text-zinc-700 ${className}`}>
+    <label className={`grid min-w-0 gap-1 text-sm font-semibold text-zinc-700 ${className}`}>
       {label}
       <input
         {...props}
-        className="h-10 rounded-lg border border-zinc-300 px-3 text-sm font-normal outline-none focus:border-emerald-600"
+        className="h-10 w-full min-w-0 rounded-lg border border-zinc-300 px-3 text-sm font-normal outline-none focus:border-emerald-600"
       />
     </label>
   );

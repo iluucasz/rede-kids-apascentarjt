@@ -44,6 +44,39 @@ export async function createClassRoom(formData: FormData) {
   return refreshed();
 }
 
+export async function updateClassRoom(formData: FormData) {
+  await requireAuthenticatedUser();
+  await ensureDatabase();
+  const sql = getDbSql();
+
+  await sql`
+    UPDATE rk_classes
+    SET
+      name = ${field(formData, "name")},
+      min_age = ${integerField(formData, "minAge")},
+      max_age = ${integerField(formData, "maxAge")},
+      service_schedule = ${field(formData, "serviceSchedule")},
+      notes = ${field(formData, "notes")},
+      active = ${field(formData, "active") !== "false"}
+    WHERE id = ${field(formData, "classId")}
+  `;
+
+  return refreshed();
+}
+
+export async function deleteClassRoom(formData: FormData) {
+  await requireAuthenticatedUser();
+  await ensureDatabase();
+  const sql = getDbSql();
+
+  await sql`
+    DELETE FROM rk_classes
+    WHERE id = ${field(formData, "classId")}
+  `;
+
+  return refreshed();
+}
+
 export async function createCategory(formData: FormData) {
   await requireAuthenticatedUser();
   await ensureDatabase();
@@ -80,6 +113,8 @@ export async function createMember(formData: FormData) {
       phone,
       birth_date,
       congregates_since,
+      enrollment_date,
+      origin,
       class_id,
       address,
       notes
@@ -92,6 +127,8 @@ export async function createMember(formData: FormData) {
       ${field(formData, "phone")},
       ${field(formData, "birthDate")},
       ${field(formData, "congregatesSince")},
+      ${kind === "child" ? field(formData, "enrollmentDate") : ""},
+      ${kind === "child" ? coerceOrigin(field(formData, "origin")) : ""},
       ${nullable(kind === "child" ? field(formData, "classId") : "")},
       ${field(formData, "address")},
       ${field(formData, "notes")}
@@ -99,6 +136,7 @@ export async function createMember(formData: FormData) {
   `;
 
   await replaceMemberGuardianLinks(sql, memberId, kind, formData);
+  await replaceChildClassLinks(sql, memberId, kind, formData);
 
   for (const categoryId of categoryIds) {
     await sql`
@@ -106,6 +144,10 @@ export async function createMember(formData: FormData) {
       VALUES (${memberId}, ${categoryId})
       ON CONFLICT DO NOTHING
     `;
+  }
+
+  if (kind === "child") {
+    await createInlineGuardianAndLink(sql, memberId, formData);
   }
 
   return refreshed();
@@ -132,6 +174,8 @@ export async function updateMember(formData: FormData) {
       phone = ${field(formData, "phone")},
       birth_date = ${field(formData, "birthDate")},
       congregates_since = ${field(formData, "congregatesSince")},
+      enrollment_date = ${kind === "child" ? field(formData, "enrollmentDate") : ""},
+      origin = ${kind === "child" ? coerceOrigin(field(formData, "origin")) : ""},
       class_id = ${nullable(kind === "child" ? field(formData, "classId") : "")},
       address = ${field(formData, "address")},
       notes = ${field(formData, "notes")}
@@ -139,6 +183,7 @@ export async function updateMember(formData: FormData) {
   `;
 
   await replaceMemberGuardianLinks(sql, memberId, kind, formData);
+  await replaceChildClassLinks(sql, memberId, kind, formData);
 
   await sql`DELETE FROM rk_member_categories WHERE member_id = ${memberId}`;
 
@@ -148,6 +193,10 @@ export async function updateMember(formData: FormData) {
       VALUES (${memberId}, ${categoryId})
       ON CONFLICT DO NOTHING
     `;
+  }
+
+  if (kind === "child") {
+    await createInlineGuardianAndLink(sql, memberId, formData);
   }
 
   return refreshed();
@@ -448,7 +497,14 @@ export async function closeLesson(formData: FormData) {
         NOW()
       FROM rk_members AS member
       WHERE member.kind = 'child'
-        AND member.class_id = ${lessonClassId}
+        AND (
+          member.class_id = ${lessonClassId}
+          OR EXISTS (
+            SELECT 1
+            FROM rk_child_classes cc
+            WHERE cc.child_id = member.id AND cc.class_id = ${lessonClassId}
+          )
+        )
         AND NOT EXISTS (
           SELECT 1
           FROM rk_attendance AS attendance
@@ -876,6 +932,76 @@ async function replaceMemberGuardianLinks(
   }
 }
 
+async function replaceChildClassLinks(
+  sql: ReturnType<typeof getDbSql>,
+  memberId: string,
+  kind: "child" | "guardian",
+  formData: FormData,
+) {
+  await sql`DELETE FROM rk_child_classes WHERE child_id = ${memberId}`;
+
+  if (kind !== "child") {
+    return;
+  }
+
+  const primaryClassId = field(formData, "classId");
+  const extraClassIds = formData
+    .getAll("extraClassIds")
+    .map((value) => String(value))
+    .filter(Boolean);
+
+  for (const classId of extraClassIds) {
+    if (!classId || classId === primaryClassId) continue;
+
+    await sql`
+      INSERT INTO rk_child_classes (child_id, class_id)
+      VALUES (${memberId}, ${classId})
+      ON CONFLICT DO NOTHING
+    `;
+  }
+}
+
+async function createInlineGuardianAndLink(
+  sql: ReturnType<typeof getDbSql>,
+  childId: string,
+  formData: FormData,
+) {
+  const names = formData.getAll("newGuardianName").map((value) => String(value));
+  const phones = formData.getAll("newGuardianPhone").map((value) => String(value));
+  const relationships = formData
+    .getAll("newGuardianRelationship")
+    .map((value) => String(value));
+  const addresses = formData
+    .getAll("newGuardianAddress")
+    .map((value) => String(value));
+
+  for (let index = 0; index < names.length; index += 1) {
+    const guardianName = (names[index] ?? "").trim();
+
+    if (!guardianName) continue;
+
+    const guardianId = createId("member");
+
+    await sql`
+      INSERT INTO rk_members (id, kind, full_name, normalized_name, phone, address)
+      VALUES (
+        ${guardianId},
+        ${"guardian"},
+        ${guardianName},
+        ${normalizeName(guardianName)},
+        ${(phones[index] ?? "").trim()},
+        ${(addresses[index] ?? "").trim()}
+      )
+    `;
+
+    await sql`
+      INSERT INTO rk_child_guardians (child_id, guardian_id, relationship)
+      VALUES (${childId}, ${guardianId}, ${(relationships[index] ?? "").trim()})
+      ON CONFLICT DO NOTHING
+    `;
+  }
+}
+
 async function assertLessonOpen(sql: ReturnType<typeof getDbSql>, lessonId: string) {
   const lessonRows = await sql`
     SELECT status FROM rk_lessons WHERE id = ${lessonId} LIMIT 1
@@ -911,9 +1037,17 @@ async function resolveLessonChildrenSnapshot(
 ) {
   const rows = classId
     ? await sql`
-        SELECT COUNT(*)::int AS count
-        FROM rk_members
-        WHERE kind = 'child' AND class_id = ${classId}
+        SELECT COUNT(DISTINCT member.id)::int AS count
+        FROM rk_members AS member
+        WHERE member.kind = 'child'
+          AND (
+            member.class_id = ${classId}
+            OR EXISTS (
+              SELECT 1
+              FROM rk_child_classes cc
+              WHERE cc.child_id = member.id AND cc.class_id = ${classId}
+            )
+          )
       `
     : await sql`
         SELECT COUNT(*)::int AS count
@@ -964,6 +1098,14 @@ function coerceScheduleRole(value: string): ScheduleRole {
   }
 
   return "minister";
+}
+
+function coerceOrigin(value: string) {
+  if (value === "projeto" || value === "rede_kids") {
+    return value;
+  }
+
+  return "";
 }
 
 function coerceAttachmentKind(value: string) {

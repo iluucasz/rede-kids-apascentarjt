@@ -1,11 +1,11 @@
 "use client";
 
 import type { Dispatch, FormEvent, SetStateAction } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
-  Baby,
   ClipboardList,
+  Plus,
   Search,
   ShieldCheck,
   Tags,
@@ -80,7 +80,9 @@ function MemberForm({
   pending: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const [kind, setKind] = useState<Member["kind"]>(initialKind);
+  const kind = initialKind;
+  const [childPhone, setChildPhone] = useState(member?.phone ?? "");
+  const [childAddress, setChildAddress] = useState(member?.address ?? "");
   const [selectedGuardianIds, setSelectedGuardianIds] = useState<string[]>(
     member?.guardianIds ?? [],
   );
@@ -97,12 +99,12 @@ function MemberForm({
   const kindContent =
     kind === "child"
       ? {
-          eyebrow: isEditing ? "Atualizar criança" : "Nova criança",
-          title: "Cadastro da criança",
+          eyebrow: isEditing ? "Atualizar membro" : "Novo membro",
+          title: "Cadastro do membro",
           description:
-            "Organize dados principais, turma e responsáveis em uma única ficha mais clara.",
+            "Informe os dados da criança e dos responsáveis em uma única ficha. Os responsáveis são criados e vinculados junto.",
           footer:
-            "Os responsáveis, turma e categorias selecionados serão vinculados após salvar.",
+            "Os responsáveis, turma e categorias informados serão criados e vinculados após salvar.",
         }
       : {
           eyebrow: isEditing ? "Atualizar responsável" : "Novo responsável",
@@ -134,41 +136,29 @@ function MemberForm({
     id: category.id,
     label: category.name,
   }));
+  const classOptions = data.classes.map((classRoom) => ({
+    id: classRoom.id,
+    label: classRoom.name,
+  }));
+  const extraClassIds = (member?.classIds ?? []).filter(
+    (classId) => classId && classId !== member?.classId,
+  );
 
   return (
     <form className="grid gap-5" onSubmit={onSubmit}>
       {member && <input type="hidden" name="memberId" value={member.id} />}
       <div className="rounded-2xl border border-emerald-200 bg-[linear-gradient(135deg,#ecfdf5_0%,#ffffff_50%,#eff6ff_100%)] p-5">
         <input type="hidden" name="kind" value={kind} />
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="max-w-2xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
-              {kindContent.eyebrow}
-            </p>
-            <h3 className="mt-2 text-xl font-semibold text-zinc-950">
-              {kindContent.title}
-            </h3>
-            <p className="mt-2 text-sm leading-6 text-zinc-600">
-              {kindContent.description}
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2 xl:min-w-85">
-            <MemberKindButton
-              icon={Baby}
-              label="Criança"
-              description="Turma, responsáveis e acompanhamento"
-              selected={kind === "child"}
-              onClick={() => setKind("child")}
-            />
-            <MemberKindButton
-              icon={ShieldCheck}
-              label="Responsável"
-              description="Contato e crianças vinculadas"
-              selected={kind === "guardian"}
-              onClick={() => setKind("guardian")}
-            />
-          </div>
+        <div className="max-w-2xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+            {kindContent.eyebrow}
+          </p>
+          <h3 className="mt-2 text-xl font-semibold text-zinc-950">
+            {kindContent.title}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-zinc-600">
+            {kindContent.description}
+          </p>
         </div>
       </div>
 
@@ -189,12 +179,14 @@ function MemberForm({
               <InputField
                 name="phone"
                 label="Telefone"
-                defaultValue={member?.phone ?? ""}
+                value={childPhone}
+                onChange={(event) => setChildPhone(event.target.value)}
               />
               <InputField
                 name="address"
                 label="Endereço"
-                defaultValue={member?.address ?? ""}
+                value={childAddress}
+                onChange={(event) => setChildAddress(event.target.value)}
               />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -212,9 +204,28 @@ function MemberForm({
               />
             </div>
             {kind === "child" ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <InputField
+                  name="enrollmentDate"
+                  label="Data de inscrição"
+                  type="date"
+                  defaultValue={member?.enrollmentDate ?? ""}
+                />
+                <SelectField
+                  name="origin"
+                  label="Origem"
+                  defaultValue={member?.origin ?? ""}
+                >
+                  <option value="">Não informado</option>
+                  <option value="projeto">Projeto</option>
+                  <option value="rede_kids">Rede Kids</option>
+                </SelectField>
+              </div>
+            ) : null}
+            {kind === "child" ? (
               <SelectField
                 name="classId"
-                label="Turma da criança"
+                label="Turma principal"
                 defaultValue={member?.classId ?? ""}
               >
                 <option value="">Sem turma</option>
@@ -224,6 +235,18 @@ function MemberForm({
                   </option>
                 ))}
               </SelectField>
+            ) : null}
+            {kind === "child" ? (
+              <OptionChecklist
+                name="extraClassIds"
+                label="Outras turmas (opcional)"
+                description="Marque turmas adicionais para vincular a criança a mais de uma turma."
+                defaultValue={extraClassIds}
+                emptyText="Nenhuma turma cadastrada ainda."
+                options={classOptions}
+                tone="emerald"
+                columns={1}
+              />
             ) : null}
           </FormSection>
 
@@ -237,20 +260,26 @@ function MemberForm({
             }
           >
             {kind === "child" ? (
-              <LinkedMembersField
-                name="guardianIds"
-                summaryLabel="Responsáveis vinculados"
-                actionLabel="Vincular responsável"
-                pickerTitle="Vincular responsáveis"
-                pickerDescription="Abra a lista, use o filtro e a busca para localizar quem acompanha esta criança."
-                searchPlaceholder="Buscar responsável"
-                emptySelectionText="Nenhum responsável vinculado ainda."
-                emptyPickerText="Nenhum responsável cadastrado ainda."
-                selectedIds={selectedGuardianIds}
-                onSelectedIdsChange={setSelectedGuardianIds}
-                options={guardianOptions}
-                tone="sky"
-              />
+              <>
+                <LinkedMembersField
+                  name="guardianIds"
+                  summaryLabel="Responsáveis vinculados"
+                  actionLabel="Vincular responsável"
+                  pickerTitle="Vincular responsáveis"
+                  pickerDescription="Abra a lista, use o filtro e a busca para localizar quem acompanha esta criança."
+                  searchPlaceholder="Buscar responsável"
+                  emptySelectionText="Nenhum responsável vinculado ainda."
+                  emptyPickerText="Nenhum responsável cadastrado ainda."
+                  selectedIds={selectedGuardianIds}
+                  onSelectedIdsChange={setSelectedGuardianIds}
+                  options={guardianOptions}
+                  tone="sky"
+                />
+                <InlineGuardianFields
+                  childPhone={childPhone}
+                  childAddress={childAddress}
+                />
+              </>
             ) : (
               <LinkedMembersField
                 name="childIds"
@@ -338,46 +367,6 @@ function FormSection({
       </div>
       <div className="mt-4 grid gap-4">{children}</div>
     </section>
-  );
-}
-
-function MemberKindButton({
-  icon: Icon,
-  label,
-  description,
-  selected,
-  onClick,
-}: {
-  icon: LucideIcon;
-  label: string;
-  description: string;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-2xl border px-4 py-3 text-left transition ${
-        selected
-          ? "border-emerald-300 bg-white text-zinc-950 shadow-sm ring-2 ring-emerald-100"
-          : "border-zinc-200 bg-white/70 text-zinc-700 hover:border-emerald-200 hover:bg-white"
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        <span
-          className={`grid size-9 shrink-0 place-items-center rounded-xl ${
-            selected ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-500"
-          }`}
-        >
-          <Icon size={18} aria-hidden="true" />
-        </span>
-        <div>
-          <p className="text-sm font-semibold">{label}</p>
-          <p className="mt-1 text-xs leading-5 text-zinc-500">{description}</p>
-        </div>
-      </div>
-    </button>
   );
 }
 
@@ -735,6 +724,186 @@ function PickerFilterButton({
     >
       {label}
     </button>
+  );
+}
+
+type GuardianRow = {
+  id: number;
+  name: string;
+  phone: string;
+  phoneSameAsChild: boolean;
+  relationship: string;
+  address: string;
+  addressSameAsChild: boolean;
+};
+
+function createGuardianRow(id: number): GuardianRow {
+  return {
+    id,
+    name: "",
+    phone: "",
+    phoneSameAsChild: false,
+    relationship: "",
+    address: "",
+    addressSameAsChild: false,
+  };
+}
+
+function InlineGuardianFields({
+  childPhone,
+  childAddress,
+}: {
+  childPhone: string;
+  childAddress: string;
+}) {
+  const nextId = useRef(1);
+  const [rows, setRows] = useState<GuardianRow[]>([]);
+
+  function addRow() {
+    setRows((current) => [...current, createGuardianRow(nextId.current++)]);
+  }
+
+  function removeRow(id: number) {
+    setRows((current) => current.filter((row) => row.id !== id));
+  }
+
+  function updateRow(id: number, patch: Partial<GuardianRow>) {
+    setRows((current) =>
+      current.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-dashed border-sky-300 bg-sky-50/40 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-zinc-900">
+            Cadastrar responsáveis junto
+          </p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">
+            Informe os dados dos pais/responsáveis aqui e eles serão criados e vinculados a
+            esta criança no mesmo cadastro. Você pode adicionar mais de um.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={addRow}
+          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-sky-700 px-4 text-sm font-semibold text-white hover:bg-sky-800"
+        >
+          <Plus size={16} aria-hidden="true" />
+          Adicionar responsável
+        </button>
+      </div>
+
+      {rows.length ? (
+        <div className="mt-4 grid gap-3">
+          {rows.map((row, index) => (
+            <div key={row.id} className="rounded-xl border border-sky-200 bg-white p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">
+                  Responsável {index + 1}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => removeRow(row.id)}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                >
+                  <X size={14} aria-hidden="true" />
+                  Remover
+                </button>
+              </div>
+              <div className="mt-3 grid gap-4">
+                <InputField
+                  name="newGuardianName"
+                  label="Nome do responsável"
+                  value={row.name}
+                  onChange={(event) => updateRow(row.id, { name: event.target.value })}
+                />
+                <GuardianCopyField
+                  label="Telefone"
+                  name="newGuardianPhone"
+                  value={row.phone}
+                  sameAsChild={row.phoneSameAsChild}
+                  childValue={childPhone}
+                  onValueChange={(value) => updateRow(row.id, { phone: value })}
+                  onSameAsChildChange={(checked) =>
+                    updateRow(row.id, { phoneSameAsChild: checked })
+                  }
+                />
+                <InputField
+                  name="newGuardianRelationship"
+                  label="Parentesco (ex.: Mãe)"
+                  value={row.relationship}
+                  onChange={(event) =>
+                    updateRow(row.id, { relationship: event.target.value })
+                  }
+                />
+                <GuardianCopyField
+                  label="Endereço"
+                  name="newGuardianAddress"
+                  value={row.address}
+                  sameAsChild={row.addressSameAsChild}
+                  childValue={childAddress}
+                  onValueChange={(value) => updateRow(row.id, { address: value })}
+                  onSameAsChildChange={(checked) =>
+                    updateRow(row.id, { addressSameAsChild: checked })
+                  }
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 rounded-xl border border-dashed border-sky-200 bg-white px-4 py-3 text-sm text-zinc-500">
+          Nenhum responsável adicionado. Use &quot;Adicionar responsável&quot; para
+          cadastrar um ou mais junto com a criança.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function GuardianCopyField({
+  label,
+  name,
+  value,
+  sameAsChild,
+  childValue,
+  onValueChange,
+  onSameAsChildChange,
+}: {
+  label: string;
+  name: string;
+  value: string;
+  sameAsChild: boolean;
+  childValue: string;
+  onValueChange: (value: string) => void;
+  onSameAsChildChange: (checked: boolean) => void;
+}) {
+  const effectiveValue = sameAsChild ? childValue : value;
+
+  return (
+    <div className="grid min-w-0 gap-1">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-zinc-700">{label}</span>
+        <label className="flex items-center gap-1.5 text-xs font-medium text-zinc-600">
+          <input
+            type="checkbox"
+            checked={sameAsChild}
+            onChange={(event) => onSameAsChildChange(event.target.checked)}
+            className="size-4 shrink-0 rounded border-zinc-300 accent-sky-600"
+          />
+          Mesmo que da criança
+        </label>
+      </div>
+      <input
+        name={name}
+        value={effectiveValue}
+        readOnly={sameAsChild}
+        onChange={(event) => onValueChange(event.target.value)}
+        className="h-10 w-full min-w-0 rounded-lg border border-zinc-300 px-3 text-sm font-normal outline-none read-only:bg-zinc-100 read-only:text-zinc-500 focus:border-emerald-600"
+      />
+    </div>
   );
 }
 

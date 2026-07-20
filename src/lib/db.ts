@@ -81,11 +81,32 @@ async function createSchema() {
       phone TEXT NOT NULL DEFAULT '',
       birth_date TEXT NOT NULL DEFAULT '',
       congregates_since TEXT NOT NULL DEFAULT '',
+      enrollment_date TEXT NOT NULL DEFAULT '',
+      origin TEXT NOT NULL DEFAULT '',
       class_id TEXT REFERENCES rk_classes(id) ON DELETE SET NULL,
       family_id TEXT REFERENCES rk_families(id) ON DELETE SET NULL,
       address TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    ALTER TABLE rk_members
+    ADD COLUMN IF NOT EXISTS enrollment_date TEXT NOT NULL DEFAULT ''
+  `;
+
+  await sql`
+    ALTER TABLE rk_members
+    ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT ''
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS rk_child_classes (
+      child_id TEXT NOT NULL REFERENCES rk_members(id) ON DELETE CASCADE,
+      class_id TEXT NOT NULL REFERENCES rk_classes(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (child_id, class_id)
     )
   `;
 
@@ -225,6 +246,7 @@ async function createSchema() {
 
   await sql`CREATE INDEX IF NOT EXISTS rk_members_kind_idx ON rk_members(kind)`;
   await sql`CREATE INDEX IF NOT EXISTS rk_members_class_idx ON rk_members(class_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS rk_child_classes_class_idx ON rk_child_classes(class_id)`;
   await sql`CREATE INDEX IF NOT EXISTS rk_lessons_scheduled_idx ON rk_lessons(scheduled_at)`;
   await sql`CREATE INDEX IF NOT EXISTS rk_lesson_attachments_lesson_idx ON rk_lesson_attachments(lesson_id)`;
   await sql`CREATE INDEX IF NOT EXISTS rk_schedule_scheduled_idx ON rk_schedule_entries(scheduled_at)`;
@@ -352,9 +374,20 @@ export async function getAppData(): Promise<AppData> {
     sql`
       SELECT
         c.*,
-        COUNT(m.id) FILTER (WHERE m.kind = 'child') AS child_count
+        (
+          SELECT COUNT(DISTINCT m.id)
+          FROM rk_members m
+          WHERE m.kind = 'child'
+            AND (
+              m.class_id = c.id
+              OR EXISTS (
+                SELECT 1
+                FROM rk_child_classes cc
+                WHERE cc.child_id = m.id AND cc.class_id = c.id
+              )
+            )
+        ) AS child_count
       FROM rk_classes c
-      LEFT JOIN rk_members m ON m.class_id = c.id
       GROUP BY c.id
       ORDER BY c.min_age, c.name
     `,
@@ -416,7 +449,25 @@ export async function getAppData(): Promise<AppData> {
             WHERE cg.guardian_id = m.id
           ),
           ARRAY[]::TEXT[]
-        ) AS child_names
+        ) AS child_names,
+        COALESCE(
+          (
+            SELECT array_agg(cls.id ORDER BY cls.min_age, cls.name)
+            FROM rk_child_classes cc
+            JOIN rk_classes cls ON cls.id = cc.class_id
+            WHERE cc.child_id = m.id AND cc.class_id <> COALESCE(m.class_id, '')
+          ),
+          ARRAY[]::TEXT[]
+        ) AS extra_class_ids,
+        COALESCE(
+          (
+            SELECT array_agg(cls.name ORDER BY cls.min_age, cls.name)
+            FROM rk_child_classes cc
+            JOIN rk_classes cls ON cls.id = cc.class_id
+            WHERE cc.child_id = m.id AND cc.class_id <> COALESCE(m.class_id, '')
+          ),
+          ARRAY[]::TEXT[]
+        ) AS extra_class_names
       FROM rk_members m
       LEFT JOIN rk_classes c ON c.id = m.class_id
       ORDER BY m.kind, m.full_name
@@ -650,6 +701,12 @@ function mapCategory(row: DbRow): Category {
 
 function mapMember(row: DbRow): Member {
   const birthDate = text(row.birth_date);
+  const primaryClassId = text(row.class_id);
+  const primaryClassName = text(row.class_name);
+  const extraClassIds = textArray(row.extra_class_ids);
+  const extraClassNames = textArray(row.extra_class_names);
+  const classIds = [primaryClassId, ...extraClassIds].filter(Boolean);
+  const classNames = [primaryClassName, ...extraClassNames].filter(Boolean);
 
   return {
     id: text(row.id),
@@ -658,8 +715,12 @@ function mapMember(row: DbRow): Member {
     phone: text(row.phone),
     birthDate,
     congregatesSince: text(row.congregates_since),
-    classId: text(row.class_id),
-    className: text(row.class_name),
+    enrollmentDate: text(row.enrollment_date),
+    origin: text(row.origin),
+    classId: primaryClassId,
+    className: primaryClassName,
+    classIds,
+    classNames,
     address: text(row.address),
     notes: text(row.notes),
     categoryIds: textArray(row.category_ids),
